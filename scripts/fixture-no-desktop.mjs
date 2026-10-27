@@ -48,7 +48,7 @@ export function installNoDesktopFixtureGuard(fixture) {
   };
   childProcess.execFile = fixtureExecFile;
   childProcess.spawn = function (command, args, options) {
-    // Shared-history link checks spawn PowerShell and remain real functional checks.
+    // Windows path checks spawn PowerShell and remain real functional checks.
     if (!/^powershell(?:\.exe)?$/i.test(path.basename(String(command))) || options?.detached) {
       stats.blockedDesktopLaunches++;
       throw new Error(`Fixture guard blocked a desktop or unexpected executable launch: ${path.basename(String(command))}`);

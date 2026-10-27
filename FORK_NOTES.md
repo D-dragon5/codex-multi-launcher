@@ -22,4 +22,6 @@ No LICENSE file or package license was present at the base revision. This fork p
 
 Run `npm run build` and `npm run verify:local-settings`. Runtime synchronization keeps before/after backups; see [the settings guide](docs/local-settings-sync.md).
 
+The published settings branch passed the source build and 92 synthetic checks (65 settings-engine assertions and 27 lifecycle checks). Tests block real desktop launches and use fixture profiles only.
+
 Use Git branches and commits to manage source changes. A source rollback and a runtime settings rollback are separate operations: Git does not restore files in a user's external Codex profile.
