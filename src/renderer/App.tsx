@@ -51,6 +51,7 @@ type WizardStep = "profile" | "provider" | "test" | "launcher" | "generate";
 type Language = "zh" | "en";
 type ActiveView = "dashboard" | "profile" | "settings";
 type SettingsTab = "general" | "about";
+type LocalSettingsSync = NonNullable<CreateProfileInput["localSettingsSync"]>;
 
 const WIZARD_STEPS: WizardStep[] = ["profile", "provider", "test", "launcher", "generate"];
 const DEFAULT_PROFILE_COLOR = "#34C759";
@@ -141,6 +142,20 @@ const TEXT: Record<Language, Record<string, string>> = {
     profileColorReview: "图标颜色",
     inheritConfig: "沿用当前 Codex 设置",
     inheritConfigDesc: "保留已有插件、服务、可信项目和功能开关。",
+    localSettingsSync: "保持本地设置与个性化一致",
+    localSettingsSyncDesc: "从一个来源单向同步本地通用设置、自定义指令、技能和个性化。",
+    localSettingsSyncTiming: "创建时，以及每次从未运行状态打开前同步；窗口打开后不实时同步。",
+    localSettingsSyncExcluded: "此选项不包含账号、凭证、模型服务、API、网页内容、会话数据、权限、执行规则或实例运行状态。",
+    localSettingsSyncReplacesInheritance: "已停用上方的一次性设置继承；将按下方选定来源和限定范围同步。",
+    localSettingsSyncSource: "本地设置来源（单选）",
+    localSettingsSyncDefaultSource: "当前 Codex / ChatGPT",
+    localSettingsSyncUnavailable: "原来源已不可用",
+    localSettingsSyncInvalid: "请选择当前应用或其它可用配置作为来源，不能选择当前配置自身。",
+    localSettingsSyncReview: "本地设置与个性化",
+    localSettingsSyncOff: "关闭",
+    localSettingsSyncOn: "启用",
+    saveLocalSettingsSync: "保存本地设置同步",
+    localSettingsSyncSaveWithProvider: "与下方配置一起保存。",
     syncHistory: "同步已有对话记录",
     syncHistoryDesc: "从当前 App 或已创建配置里复制历史对话，新配置后续仍独立使用。",
     syncHistorySource: "从哪里同步",
@@ -359,6 +374,20 @@ const TEXT: Record<Language, Record<string, string>> = {
     profileColorReview: "Icon color",
     inheritConfig: "Inherit my default Codex config",
     inheritConfigDesc: "Keep existing plugins, MCP servers, trusted projects, and feature flags.",
+    localSettingsSync: "Keep local settings and personalization consistent",
+    localSettingsSyncDesc: "Sync local general settings, custom instructions, skills, and personalization one way from a single source.",
+    localSettingsSyncTiming: "Sync during creation and before each launch from a stopped state. No live sync after the window opens.",
+    localSettingsSyncExcluded: "This option excludes accounts, credentials, model providers, APIs, web content, conversations, permissions, execution rules, and instance runtime state.",
+    localSettingsSyncReplacesInheritance: "One-time config inheritance above is disabled. Sync uses the source and limited scope selected below.",
+    localSettingsSyncSource: "Local settings source (choose one)",
+    localSettingsSyncDefaultSource: "Current Codex / ChatGPT",
+    localSettingsSyncUnavailable: "Previous source is unavailable",
+    localSettingsSyncInvalid: "Choose the current app or another available profile. A profile cannot use itself as its source.",
+    localSettingsSyncReview: "Local settings and personalization",
+    localSettingsSyncOff: "Off",
+    localSettingsSyncOn: "On",
+    saveLocalSettingsSync: "Save local settings sync",
+    localSettingsSyncSaveWithProvider: "Save together with the configuration below.",
     syncHistory: "Bring over existing chats",
     syncHistoryDesc: "Copy chats from the current app or existing profiles while keeping this profile independent.",
     syncHistorySource: "Sync from",
@@ -506,6 +535,7 @@ const DEFAULT_FORM = {
   model: "gpt-5.2",
   apiKey: "",
   inheritDefaultConfig: true,
+  localSettingsSync: { enabled: false, source: { type: "default" } } as LocalSettingsSync,
   syncHistory: false,
   syncHistorySources: ["default"] as string[],
   syncHistoryScope: "projects" as "projects" | "tasks" | "all",
@@ -560,6 +590,7 @@ export function App() {
     baseUrl: "",
     model: "",
     apiKey: "",
+    localSettingsSync: { enabled: false, source: { type: "default" } } as LocalSettingsSync,
     iconBackgroundColor: DEFAULT_PROFILE_COLOR
   });
   const [toastMessage, setToastMessage] = useState<string | null>(null);
@@ -582,7 +613,9 @@ export function App() {
 
   const currentStepIndex = WIZARD_STEPS.findIndex((step) => step === wizardStep);
   const canGoBack = currentStepIndex > 0;
-  const canGoNext = currentStepIndex < WIZARD_STEPS.length - 1 && isCurrentStepValid(wizardStep, form, subscriptionStatus);
+  const isCreateSettingsSourceValid = isLocalSettingsSyncSourceValid(form.localSettingsSync, activeProfiles);
+  const isEditSettingsSourceValid = isLocalSettingsSyncSourceValid(editForm.localSettingsSync, activeProfiles, selectedProfile?.id);
+  const canGoNext = currentStepIndex < WIZARD_STEPS.length - 1 && isCreateSettingsSourceValid && isCurrentStepValid(wizardStep, form, subscriptionStatus);
   const t = TEXT[language];
   const runningProfiles = useMemo(
     () => activeProfiles.filter((profile) => runtimeByProfileId.get(profile.id)?.status === "running"),
@@ -655,6 +688,7 @@ export function App() {
       baseUrl: selectedProfile.provider.baseUrl ?? "",
       model: selectedProfile.provider.model,
       apiKey: "",
+      localSettingsSync: selectedProfile.localSettingsSync ?? { enabled: false, source: { type: "default" } },
       iconBackgroundColor: getProfileColor(selectedProfile)
     });
     setEditProviderTest(null);
@@ -753,12 +787,16 @@ export function App() {
     setToastMessage(null);
 
     try {
+      if (!isLocalSettingsSyncSourceValid(form.localSettingsSync, activeProfiles)) {
+        throw new Error(t.localSettingsSyncInvalid);
+      }
       const input: CreateProfileInput = {
         name: form.name,
         authMode: form.authMode,
         subscriptionAuthorizationSessionId: form.authMode === "subscription" ? subscriptionAuthorization?.id : undefined,
         codexAppPath: form.codexAppPath || undefined,
-        inheritDefaultConfig: form.inheritDefaultConfig,
+        inheritDefaultConfig: !form.localSettingsSync.enabled && form.inheritDefaultConfig,
+        localSettingsSync: getLocalSettingsSyncInput(form.localSettingsSync),
         syncHistory: {
           enabled: form.syncHistory,
           scope: form.syncHistoryScope,
@@ -825,7 +863,7 @@ export function App() {
       setSubscriptionAuthorization(null);
       setSubscriptionStatus(null);
     }
-    setForm(nextForm);
+    setForm(nextForm.localSettingsSync.enabled ? { ...nextForm, inheritDefaultConfig: false } : nextForm);
     if (nextForm.baseUrl !== form.baseUrl || nextForm.apiKey !== form.apiKey || nextForm.providerType !== form.providerType) {
       setProviderModels(null);
     }
@@ -987,8 +1025,12 @@ export function App() {
     setToastMessage(null);
 
     try {
+      if (!isLocalSettingsSyncSourceValid(editForm.localSettingsSync, activeProfiles, selectedProfile.id)) {
+        throw new Error(t.localSettingsSyncInvalid);
+      }
       const result = await window.codexProfileManager.updateProfile({
         profileId: selectedProfile.id,
+        localSettingsSync: getLocalSettingsSyncInput(editForm.localSettingsSync),
         appearance: {
           iconBackgroundColor: sanitizeProfileColor(editForm.iconBackgroundColor)
         },
@@ -1356,6 +1398,27 @@ export function App() {
                   onChange={(iconBackgroundColor) => setEditForm({ ...editForm, iconBackgroundColor })}
                 />
               </div>
+              {selectedProfile.status !== "deleted" ? (
+                <div className="edit-box form">
+                  <LocalSettingsSyncOptions
+                    availableProfiles={activeProfiles}
+                    idPrefix="edit-local-settings"
+                    onChange={(localSettingsSync) => setEditForm({ ...editForm, localSettingsSync })}
+                    t={t}
+                    targetProfileId={selectedProfile.id}
+                    value={editForm.localSettingsSync}
+                  />
+                  {(selectedProfile.auth?.mode ?? "api_key") === "api_key" ? (
+                    <p className="field-note">{t.localSettingsSyncSaveWithProvider}</p>
+                  ) : (
+                    <div className="button-row">
+                      <button className="button secondary" disabled={isUpdatingProfile || !isEditSettingsSourceValid} onClick={() => void saveSelectedProfile()} type="button">
+                        {isUpdatingProfile ? t.saving : t.saveLocalSettingsSync}
+                      </button>
+                    </div>
+                  )}
+                </div>
+              ) : null}
               {(selectedProfile.auth?.mode ?? "api_key") === "chatgpt_account" ? (
                 <div className="edit-box account-profile-box">
                   <span className="auth-mode-icon"><User size={16} /></span>
@@ -1420,7 +1483,7 @@ export function App() {
                       <TestTube2 size={15} />
                       {isTestingEditProvider ? t.testing : t.test}
                     </button>
-                    <button className="button secondary" disabled={isUpdatingProfile || !editForm.providerName || !editForm.baseUrl || !editForm.model} onClick={() => void saveSelectedProfile()} type="button">
+                    <button className="button secondary" disabled={isUpdatingProfile || !isEditSettingsSourceValid || !editForm.providerName || !editForm.baseUrl || !editForm.model} onClick={() => void saveSelectedProfile()} type="button">
                       {isUpdatingProfile ? t.saving : t.saveProvider}
                     </button>
                   </div>
@@ -1437,6 +1500,7 @@ export function App() {
                 </summary>
                 <div className="advanced-details-body">
                   <div className="advanced-path-list">
+                    <PathRow label="Profile ID" value={selectedProfile.id} />
                     <PathRow icon={<Folder size={15} />} label="CODEX_HOME" onReveal={() => void revealPath(selectedProfile.paths.codexHome)} value={selectedProfile.paths.codexHome} />
                     <PathRow icon={<Folder size={15} />} label="user-data-dir" onReveal={() => void revealPath(selectedProfile.paths.userDataDir)} value={selectedProfile.paths.userDataDir} />
                     <PathRow icon={<Folder size={15} />} label="Launcher" onReveal={() => void revealPath(selectedProfile.paths.launcherPath)} value={selectedProfile.paths.launcherPath} />
@@ -1532,7 +1596,7 @@ export function App() {
                 {t.back}
               </button>
               {wizardStep === "generate" ? (
-                <button className="button primary" disabled={isCreating || !isCurrentStepValid(wizardStep, form, subscriptionStatus)} onClick={() => void createProfile()} type="button">
+                <button className="button primary" disabled={isCreating || !isCreateSettingsSourceValid || !isCurrentStepValid(wizardStep, form, subscriptionStatus)} onClick={() => void createProfile()} type="button">
                   <Plus size={16} />
                   {isCreating ? t.generating : t.generate}
                 </button>
@@ -2222,13 +2286,21 @@ function WizardBody({
           onChange={(iconBackgroundColor) => onChange({ ...form, iconBackgroundColor })}
         />
         <label className="toggle-card">
-          <input checked={form.inheritDefaultConfig} onChange={(event) => onChange({ ...form, inheritDefaultConfig: event.target.checked })} type="checkbox" />
+          <input checked={!form.localSettingsSync.enabled && form.inheritDefaultConfig} disabled={form.localSettingsSync.enabled} onChange={(event) => onChange({ ...form, inheritDefaultConfig: event.target.checked })} type="checkbox" />
           <span className="toggle-copy">
             <strong>{t.inheritConfig}</strong>
             <small>{t.inheritConfigDesc}</small>
           </span>
           <span className="switch-track" aria-hidden="true"><span /></span>
         </label>
+        {form.localSettingsSync.enabled ? <p className="field-note">{t.localSettingsSyncReplacesInheritance}</p> : null}
+        <LocalSettingsSyncOptions
+          availableProfiles={availableHistoryProfiles}
+          idPrefix="create-local-settings"
+          onChange={(localSettingsSync) => onChange({ ...form, localSettingsSync })}
+          t={t}
+          value={form.localSettingsSync}
+        />
         <label className="toggle-card">
           <input checked={form.syncHistory} onChange={(event) => onChange({ ...form, syncHistory: event.target.checked })} type="checkbox" />
           <span className="toggle-copy">
@@ -2404,7 +2476,10 @@ function WizardBody({
       ) : null}
       <PathRow label={t.codexAppPath} value={form.codexAppPath || t.codexAppPlaceholder} />
       <PathRow label={t.launcherDirectory} value={form.launcherDirectory || "~/Applications/Codex Profiles/"} />
-      <PathRow label={t.inheritConfigReview} value={form.inheritDefaultConfig ? t.yes : t.no} />
+      <PathRow label={t.inheritConfigReview} value={!form.localSettingsSync.enabled && form.inheritDefaultConfig ? t.yes : t.no} />
+      <PathRow label={t.localSettingsSyncReview} value={form.localSettingsSync.enabled ? t.localSettingsSyncOn : t.localSettingsSyncOff} />
+      {form.localSettingsSync.enabled ? <PathRow label={t.localSettingsSyncSource} value={getLocalSettingsSyncSourceSummary(form.localSettingsSync, availableHistoryProfiles, t)} /> : null}
+      {form.localSettingsSync.enabled ? <p className="field-note">{t.localSettingsSyncTiming} {t.localSettingsSyncExcluded}</p> : null}
       <PathRow
         label={t.syncHistoryReview}
         value={form.syncHistory
@@ -2500,6 +2575,91 @@ function SubscriptionAuthorizationPanel({
       </button>
     </div>
   );
+}
+
+function LocalSettingsSyncOptions({
+  availableProfiles,
+  idPrefix,
+  onChange,
+  t,
+  targetProfileId,
+  value
+}: {
+  availableProfiles: ManagedProfile[];
+  idPrefix: string;
+  onChange: (value: LocalSettingsSync) => void;
+  t: Record<string, string>;
+  targetProfileId?: string;
+  value: LocalSettingsSync;
+}) {
+  const sources = availableProfiles.filter((profile) => profile.status === "active" && profile.id !== targetProfileId);
+  const sourceValue = value.source?.type === "profile" ? `profile:${value.source.profileId ?? ""}` : "default";
+  const sourceIsAvailable = isLocalSettingsSyncSourceValid({ ...value, enabled: true }, sources, targetProfileId);
+
+  function selectSource(source: string) {
+    if (source === "default") {
+      onChange({ ...value, source: { type: "default" } });
+      return;
+    }
+    const profileId = source.slice("profile:".length);
+    if (source.startsWith("profile:") && sources.some((profile) => profile.id === profileId)) {
+      onChange({ ...value, source: { type: "profile", profileId } });
+    }
+  }
+
+  return (
+    <>
+      <label className="toggle-card local-settings-sync-toggle">
+        <input
+          aria-describedby={`${idPrefix}-scope`}
+          checked={value.enabled}
+          onChange={(event) => onChange({ ...value, enabled: event.target.checked })}
+          type="checkbox"
+        />
+        <span className="toggle-copy">
+          <strong>{t.localSettingsSync}</strong>
+          <small>{t.localSettingsSyncDesc}</small>
+        </span>
+        <span className="switch-track" aria-hidden="true"><span /></span>
+      </label>
+      <p className="field-note" id={`${idPrefix}-scope`}>{t.localSettingsSyncTiming} {t.localSettingsSyncExcluded}</p>
+      {value.enabled ? (
+        <div className="history-sync-panel">
+          <label htmlFor={`${idPrefix}-source`}>
+            {t.localSettingsSyncSource}
+            <select id={`${idPrefix}-source`} onChange={(event) => selectSource(event.target.value)} value={sourceValue}>
+              <option value="default">{t.localSettingsSyncDefaultSource}</option>
+              {sources.map((profile) => <option key={profile.id} value={`profile:${profile.id}`}>{profile.name}</option>)}
+              {!sourceIsAvailable ? <option disabled value={sourceValue}>{t.localSettingsSyncUnavailable}</option> : null}
+            </select>
+          </label>
+          {!sourceIsAvailable ? <p className="field-note" role="alert">{t.localSettingsSyncInvalid}</p> : null}
+        </div>
+      ) : null}
+    </>
+  );
+}
+
+function isLocalSettingsSyncSourceValid(value: LocalSettingsSync, availableProfiles: ManagedProfile[], targetProfileId?: string): boolean {
+  if (!value.enabled || !value.source || value.source.type === "default") return true;
+  return value.source.type === "profile"
+    && Boolean(value.source.profileId)
+    && value.source.profileId !== targetProfileId
+    && availableProfiles.some((profile) => profile.status === "active" && profile.id === value.source?.profileId);
+}
+
+function getLocalSettingsSyncInput(value: LocalSettingsSync): LocalSettingsSync {
+  return {
+    enabled: value.enabled,
+    source: value.source?.type === "profile" && value.source.profileId
+      ? { type: "profile", profileId: value.source.profileId }
+      : { type: "default" }
+  };
+}
+
+function getLocalSettingsSyncSourceSummary(value: LocalSettingsSync, availableProfiles: ManagedProfile[], t: Record<string, string>): string {
+  if (value.source?.type !== "profile") return t.localSettingsSyncDefaultSource;
+  return availableProfiles.find((profile) => profile.status === "active" && profile.id === value.source?.profileId)?.name ?? t.localSettingsSyncUnavailable;
 }
 
 function HistorySyncOptions({

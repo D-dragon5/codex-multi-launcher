@@ -1,3 +1,5 @@
+> **下游实验分支：仅统一本地配置。** 基于 [JqyModi/codex-multi-launcher](https://github.com/JqyModi/codex-multi-launcher)，保留上游作者与提交历史。本分支新增可选的设置、个性化、指令和技能同步；未新增聊天库共享、退出回写或账号接管。真实双账号执行归属尚未验证。范围及来源见 [FORK_NOTES.md](FORK_NOTES.md)。
+
 [English](README.md) | [简体中文](README.zh-CN.md)
 
 # Codex Multi Launcher（Codex 多开助手）
@@ -27,6 +29,10 @@
 - 不想反复修改 `config.toml`、环境变量和启动参数。
 
 Codex 多开助手将这些操作整理成了可视化创建流程。
+
+## 本地修改：设置与个性化一致
+
+本地版本新增可选的「保持本地设置与个性化一致」：选择一个来源，在创建和启动目标配置前同步通用偏好、自定义指令、技能及个性化。默认关闭，账号、凭证、权限和会话数据保持独立。同步前自动备份；使用范围、模拟界面与恢复方法见[本地设置同步说明](docs/local-settings-sync.md)。
 
 ## 主要功能
 

@@ -5,3 +5,15 @@ dist-app/
 build/
 .DS_Store
 npm-debug.log*
+.test-work/
+
+# Local credentials and runtime data must never be published.
+auth.json
+/pro.json
+/plus.json
+.env
+.env.*
+/profiles.json
+/secrets.enc.json
+/master.key
+.local-backups/

@@ -2,7 +2,7 @@ import path from "node:path";
 import { ensureDir, readJsonFile, writeJsonFile } from "./fs-utils.js";
 import { getAppPaths, isWindowsCodexGuiExecutable, launcherFileName, resolveCodexDesktopApp, slugifyProfileName } from "./paths.js";
 import { pathExists } from "./fs-utils.js";
-import type { CreateProfileInput, ManagedProfile, ProfileRegistry, UpdateProfileInput } from "../shared/types.js";
+import type { CreateProfileInput, LocalSettingsSyncInput, ManagedProfile, ProfileRegistry, UpdateProfileInput } from "../shared/types.js";
 
 export const DEFAULT_PROFILE_ICON_BACKGROUND_COLOR = "#34C759";
 
@@ -79,6 +79,7 @@ export async function createProfileRecord(input: CreateProfileInput): Promise<Ma
     auth: {
       mode: input.authMode ?? "api_key"
     },
+    localSettingsSync: normalizeLocalSettingsSync(input.localSettingsSync),
     appearance: {
       iconBackgroundColor: normalizeHexColor(input.appearance?.iconBackgroundColor)
     },
@@ -148,6 +149,9 @@ export async function updateProfileRecord(input: UpdateProfileInput): Promise<Ma
   profile.provider.baseUrl = input.provider.baseUrl;
   profile.provider.model = input.provider.model;
   profile.provider.reasoningEffort = input.provider.reasoningEffort ?? profile.provider.reasoningEffort;
+  if (input.localSettingsSync !== undefined) {
+    profile.localSettingsSync = normalizeLocalSettingsSync(input.localSettingsSync);
+  }
   profile.appearance = {
     ...normalizeProfile(profile).appearance,
     ...(input.appearance?.iconBackgroundColor ? { iconBackgroundColor: normalizeHexColor(input.appearance.iconBackgroundColor) } : {})
@@ -204,7 +208,18 @@ function normalizeProfile(profile: ManagedProfile): ManagedProfile {
   profile.appearance = {
     iconBackgroundColor: normalizeHexColor(profile.appearance?.iconBackgroundColor)
   };
+  profile.localSettingsSync = normalizeLocalSettingsSync(profile.localSettingsSync);
   return profile;
+}
+
+export function normalizeLocalSettingsSync(input?: LocalSettingsSyncInput): LocalSettingsSyncInput {
+  const enabled = input?.enabled === true;
+  const source = input?.source ?? { type: "default" as const };
+  if (source.type === "default") return { enabled, source: { type: "default" } };
+  if (source.type === "profile" && typeof source.profileId === "string" && source.profileId.trim()) {
+    return { enabled, source: { type: "profile", profileId: source.profileId.trim() } };
+  }
+  throw new Error("Choose a valid source for local settings sync.");
 }
 
 function normalizeHexColor(value: string | undefined): string {

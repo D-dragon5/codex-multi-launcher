@@ -85,6 +85,7 @@ export interface ManagedProfile {
   paths: ProfilePaths;
   provider: ProviderConfig;
   auth: ProfileAuthConfig;
+  localSettingsSync?: LocalSettingsSyncInput;
   appearance: ProfileAppearance;
   launch: LaunchMetadata;
   timestamps: {
@@ -155,6 +156,12 @@ export interface SessionHistorySyncResolvedSource {
   profileId?: string;
 }
 
+/** One-way, startup-only sync. Authentication and conversation state stay isolated. */
+export interface LocalSettingsSyncInput {
+  enabled: boolean;
+  source?: SessionHistorySyncSourceInput;
+}
+
 export interface CreateProfileInput {
   name: string;
   authMode?: ProfileAuthMode;
@@ -162,6 +169,7 @@ export interface CreateProfileInput {
   subscriptionAuthorizationSessionId?: string;
   codexAppPath?: string;
   inheritDefaultConfig?: boolean;
+  localSettingsSync?: LocalSettingsSyncInput;
   syncHistory?: SessionHistorySyncInput;
   launcherDirectory?: string;
   appearance?: Partial<ProfileAppearance>;
@@ -183,6 +191,7 @@ export interface CreateProfileResult {
 
 export interface UpdateProfileInput {
   profileId: string;
+  localSettingsSync?: LocalSettingsSyncInput;
   appearance?: Partial<ProfileAppearance>;
   provider: {
     displayName: string;

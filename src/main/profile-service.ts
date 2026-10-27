@@ -3,7 +3,8 @@ import nodeFs from "node:fs";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { inheritDefaultCodexHomeResources, listConfigBackups as listProfileConfigBackups, repairProfileGlobalState, restoreConfigBackup as restoreProfileConfigBackup, syncSessionHistory, writeCodexAuth, writeCodexConfig } from "./codex-config.js";
-import { createProfileRecord, findProfile, listProfiles, removeProfileRecord, repairProfileCodexAppPath, restoreProfileRecord, softDeleteProfile, updateProfileLaunchMetadata, updateProfileRecord } from "./registry.js";
+import { createProfileRecord, findProfile, listProfiles, normalizeLocalSettingsSync, removeProfileRecord, repairProfileCodexAppPath, restoreProfileRecord, softDeleteProfile, updateProfileLaunchMetadata, updateProfileRecord } from "./registry.js";
+import { syncLocalSettings, validateLocalSettingsSyncPaths } from "./local-settings-sync.js";
 import { generateLauncher } from "./launcher.js";
 import { codexExecutablePath, findWindowsCodexAppxDesktopApp, getDefaultCodexHome, getRuntimePlatform, isWindowsAppsPath, isWindowsCodexGuiExecutable } from "./paths.js";
 import { pathExists } from "./fs-utils.js";
@@ -11,9 +12,9 @@ import { ensureWindowsAppxDesktopCache } from "./windows-appx-cache.js";
 import { restoreWindowsDesktopTaskbarIdentity } from "./windows-window-icon.js";
 import { listProviderModels, testProvider } from "./provider-test.js";
 import { deleteProfileSecrets, getApiKey, upsertApiKey } from "./secrets.js";
-import { getRuntimeStatus as inspectRuntimeStatus } from "./runtime.js";
+import { assertProfileStoppedForSettingsSync, getRuntimeStatus as inspectRuntimeStatus } from "./runtime.js";
 import { cancelSubscriptionAuthorization, getAuthorizedSubscriptionConfig } from "./subscription-auth.js";
-import type { ConfigBackupInfo, CreateProfileInput, CreateProfileResult, LauncherResult, ManagedProfile, ProfileProviderModelsInput, ProfileProviderTestInput, ProfileRuntimeInfo, ProviderModelsResult, ProviderTestResult, ReauthorizeSubscriptionProfileInput, RestoreConfigBackupInput, RestoreConfigBackupResult, SessionHistorySyncResolvedSource, UpdateProfileInput, UpdateProfileResult } from "../shared/types.js";
+import type { ConfigBackupInfo, CreateProfileInput, CreateProfileResult, LauncherResult, LocalSettingsSyncInput, ManagedProfile, ProfileProviderModelsInput, ProfileProviderTestInput, ProfileRuntimeInfo, ProviderModelsResult, ProviderTestResult, ReauthorizeSubscriptionProfileInput, RestoreConfigBackupInput, RestoreConfigBackupResult, SessionHistorySyncResolvedSource, UpdateProfileInput, UpdateProfileResult } from "../shared/types.js";
 
 export { listProfiles };
 
@@ -42,6 +43,7 @@ export async function restoreConfigBackup(input: RestoreConfigBackupInput): Prom
 }
 
 export async function createProfile(input: CreateProfileInput): Promise<CreateProfileResult> {
+  const settingsSourceHome = await resolveLocalSettingsSource(input.localSettingsSync);
   const subscriptionSessionId = input.subscriptionAuthorizationSessionId?.trim();
   if (input.authMode === "subscription" && !subscriptionSessionId) {
     throw new Error("Subscription authorization is required before creating this profile.");
@@ -84,13 +86,17 @@ export async function createProfile(input: CreateProfileInput): Promise<CreatePr
       });
       await writeCodexAuth(profile, apiKey);
     }
-    if (resolvedInput.inheritDefaultConfig) {
+    const inheritDefaultConfig = Boolean(resolvedInput.inheritDefaultConfig && !resolvedInput.localSettingsSync?.enabled);
+    if (inheritDefaultConfig) {
       await inheritDefaultCodexHomeResources(profile);
     }
     if (resolvedInput.syncHistory?.enabled) {
       await syncSessionHistory(profile, resolvedInput.syncHistory, await resolveSessionHistorySources(resolvedInput, profile));
     }
-    const configPath = await writeCodexConfig(profile, { inheritDefaultConfig: resolvedInput.inheritDefaultConfig });
+    const configPath = await writeCodexConfig(profile, { inheritDefaultConfig });
+    if (settingsSourceHome) {
+      await syncLocalSettings(profile.paths.codexHome, settingsSourceHome);
+    }
     const launcher = await generateLauncher(profile);
 
     if (subscriptionSessionId) {
@@ -103,11 +109,33 @@ export async function createProfile(input: CreateProfileInput): Promise<CreatePr
       launcherPath: launcher.launcherPath
     };
   } catch (error) {
-    if (subscriptionSessionId) {
+    if (subscriptionSessionId || resolvedInput.localSettingsSync?.enabled) {
       await cleanupFailedProfileCreation(profile);
     }
     throw error;
   }
+}
+
+async function resolveLocalSettingsSource(settings?: LocalSettingsSyncInput, target?: ManagedProfile): Promise<string | null> {
+  const policy = normalizeLocalSettingsSync(settings);
+  if (!policy.enabled) return null;
+  let sourceHome: string;
+  if (policy.source?.type === "profile") {
+    if (policy.source.profileId === target?.id) {
+      throw new Error("A profile cannot use itself as its local settings source.");
+    }
+    const source = await findProfile(policy.source.profileId!);
+    if (!source || source.status !== "active") {
+      throw new Error("The local settings source is unavailable. Choose another source or turn sync off.");
+    }
+    sourceHome = source.paths.codexHome;
+  } else {
+    sourceHome = getDefaultCodexHome();
+  }
+  if (!(await pathExists(sourceHome))) {
+    throw new Error("The local settings source directory was not found. Choose another source or turn sync off.");
+  }
+  return sourceHome;
 }
 
 async function resolveSessionHistorySources(input: CreateProfileInput, targetProfile: ManagedProfile): Promise<SessionHistorySyncResolvedSource[]> {
@@ -176,6 +204,9 @@ export async function refreshActiveProfileLaunchers(): Promise<void> {
 }
 
 export async function updateProfile(input: UpdateProfileInput): Promise<UpdateProfileResult> {
+  if (input.localSettingsSync !== undefined) {
+    await resolveLocalSettingsSource(input.localSettingsSync, await mustFindProfile(input.profileId));
+  }
   const profile = await updateProfileRecord(input);
 
   if (isApiKeyProfile(profile) && input.provider.apiKey) {
@@ -299,8 +330,27 @@ export async function restoreProfile(profileId: string): Promise<{ ok: true }> {
   return { ok: true };
 }
 
+const openingProfiles = new Set<string>();
+
 export async function openProfile(profileId: string): Promise<{ pid: number | null }> {
+  if (openingProfiles.has(profileId)) throw new Error("This profile is already opening. Wait for the current launch to finish.");
+  openingProfiles.add(profileId);
+  try {
+    return await openProfileOnce(profileId);
+  } finally {
+    openingProfiles.delete(profileId);
+  }
+}
+
+async function openProfileOnce(profileId: string): Promise<{ pid: number | null }> {
   const profile = await repairProfileCodexAppPath(await mustFindProfile(profileId));
+  let settingsSourceHome: string | null = null;
+  if (profile.localSettingsSync?.enabled) {
+    // Never replace settings that a live Codex process has already loaded.
+    await assertProfileStoppedForSettingsSync(profile);
+    settingsSourceHome = await resolveLocalSettingsSource(profile.localSettingsSync, profile);
+    await validateLocalSettingsSyncPaths(profile.paths.codexHome, settingsSourceHome!);
+  }
   const launchLog = await createLaunchLog(profile);
   await launchLog.append("openProfile started", {
     profileId: profile.id,
@@ -326,6 +376,11 @@ export async function openProfile(profileId: string): Promise<{ pid: number | nu
 
     await launchLog.append("repairing profile global state");
     await repairProfileGlobalState(profile);
+    if (settingsSourceHome) {
+      await launchLog.append("synchronizing local settings before launch");
+      const settingsSync = await syncLocalSettings(profile.paths.codexHome, settingsSourceHome);
+      await launchLog.append("local settings synchronized", settingsSync);
+    }
     let codexExecutable = codexExecutablePath(profile.paths.codexAppPath);
     const installedWindowsAppx = getRuntimePlatform() === "win32" ? findWindowsCodexAppxDesktopApp() : null;
     const windowsAppUserModelId = installedWindowsAppx

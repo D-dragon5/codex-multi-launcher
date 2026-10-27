@@ -7,7 +7,7 @@
   "type": "module",
   "scripts": {
     "build": "npm run build:main && npm run build:renderer",
-    "build:main": "tsc -p tsconfig.main.json && cp src/preload/index.cjs dist-electron/preload/index.cjs",
+    "build:main": "tsc -p tsconfig.main.json && node scripts/copy-preload.mjs",
     "build:renderer": "tsc -p tsconfig.renderer.json && vite build",
     "dev": "npm run build:main && concurrently -k \"tsc -p tsconfig.main.json --watch\" \"vite --host 127.0.0.1\" \"wait-on http://127.0.0.1:5173 && cross-env VITE_DEV_SERVER_URL=http://127.0.0.1:5173 electron .\"",
     "build:icon": "node scripts/build-icon.mjs",
@@ -34,6 +34,9 @@
     "verify:paths": "npm run build:main && node scripts/verify-path-provider.mjs",
     "verify:win-launcher": "npm run build:main && node scripts/verify-windows-launcher.mjs",
     "verify:win-inheritance": "npm run build:main && node scripts/verify-windows-inheritance.mjs",
+    "verify:local-settings": "npm run build:main && node scripts/verify-local-settings-sync.mjs && node scripts/verify-local-settings-lifecycle.mjs",
+    "restore:local-settings": "npm run build:main && node scripts/restore-local-settings-sync.mjs",
+    "preview:local-settings": "vite --host 127.0.0.1 --port 5175 --strictPort",
     "verify:win-profile-create": "npm run build:main && node scripts/verify-windows-profile-create-smoke.mjs",
     "verify:win-session-sync": "npm run build:main && node scripts/verify-windows-session-sync.mjs",
     "verify:subscription-auth": "npm run build:main && node scripts/verify-subscription-auth.mjs",
@@ -45,6 +48,7 @@
     "verify:update-cdp": "node scripts/run-update-cdp-test.mjs"
   },
   "dependencies": {
+    "@iarna/toml": "2.2.5",
     "electron-updater": "^6.8.9",
     "lucide-react": "^0.561.0",
     "react": "^19.2.3",

@@ -1,3 +1,5 @@
+> **Experimental downstream branch: local settings only.** Based on [JqyModi/codex-multi-launcher](https://github.com/JqyModi/codex-multi-launcher), preserving upstream authorship and history. This branch adds optional preference, personalization, instruction and skill synchronization. It adds no shared chat storage, exit-time history export or account takeover. Real-account concurrent execution has not been verified. See [FORK_NOTES.md](FORK_NOTES.md).
+
 [English](README.md) | [简体中文](README.zh-CN.md)
 
 # Codex Multi Launcher

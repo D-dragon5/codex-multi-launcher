@@ -925,6 +925,19 @@ code {
   box-shadow: 0 0 0 3px rgb(147 197 253 / 35%);
 }
 
+.local-settings-sync-toggle {
+  position: relative;
+  min-width: 0;
+}
+
+.local-settings-sync-toggle input {
+  top: 0;
+  left: 0;
+  width: 1px;
+  height: 1px;
+  margin: 0;
+}
+
 .toggle-copy {
   display: grid;
   gap: 2px;
